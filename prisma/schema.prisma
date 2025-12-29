@@ -1,0 +1,323 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  STOCK_MANAGER
+  CASHIER
+}
+
+enum UnitType {
+  UNIT        // Unité (ex: marteau)
+  LENGTH      // Longueur (ex: câbles au mètre)
+  BULK        // Vrac (ex: sable par tonne)
+}
+
+enum PaymentMethod {
+  CASH        // Espèces
+  MOBILE_MONEY
+  CARD        // Carte
+  CREDIT      // Crédit (client fidèle)
+}
+
+enum ClientStatus {
+  ACTIVE      // Compte actif
+  BLOCKED     // Compte bloqué (trop de retards)
+  LITIGATION  // En contentieux
+}
+
+enum StockMovementType {
+  IN          // Entrée
+  OUT         // Sortie
+  ADJUSTMENT  // Ajustement
+  SALE        // Vente
+  PURCHASE    // Achat
+}
+
+model User {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  email     String   @unique
+  password  String
+  name      String
+  role      UserRole @default(CASHIER)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  sales            Sale[]           @relation("UserSales")
+  stockMovements   StockMovement[]  @relation("UserStockMovements")
+  purchaseOrders   PurchaseOrder[]  @relation("UserPurchaseOrders")
+  payments         Payment[]        @relation("UserPayments")
+
+  @@map("users")
+}
+
+model Category {
+  id          String    @id @default(auto()) @map("_id") @db.ObjectId
+  name        String    @unique
+  description String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime @updatedAt
+
+  products    Product[]
+
+  @@map("categories")
+}
+
+model Brand {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  name      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  products  Product[]
+
+  @@map("brands")
+}
+
+model Supplier {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  name        String
+  contactName String?
+  email       String?
+  phone       String?
+  address     String?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  purchaseOrders PurchaseOrder[]
+
+  @@index([name])
+  @@map("suppliers")
+}
+
+model Product {
+  id              String    @id @default(auto()) @map("_id") @db.ObjectId
+  name            String
+  description     String?
+  sku             String    @unique // Code produit unique
+  barcode         String?   @unique // Code-barres
+  imageUrl        String?
+  
+  // Catégorie et marque
+  categoryId      String    @db.ObjectId
+  category        Category  @relation(fields: [categoryId], references: [id])
+  brandId         String?   @db.ObjectId
+  brand           Brand?    @relation(fields: [brandId], references: [id])
+  
+  // Unités et prix
+  unitType        UnitType  @default(UNIT)
+  unitLabel       String    @default("unité") // "unité", "mètre", "tonne", etc.
+  purchasePrice   Float     // Prix d'achat
+  sellingPrice    Float     // Prix de vente
+  
+  // Stock
+  quantity        Float     @default(0)
+  minThreshold    Float     @default(0) // Seuil critique
+  
+  active          Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  // Relations
+  stockMovements  StockMovement[]
+  saleItems       SaleItem[]
+  purchaseOrderItems PurchaseOrderItem[]
+
+  @@index([name])
+  @@index([categoryId])
+  @@map("products")
+}
+
+model StockMovement {
+  id              String            @id @default(auto()) @map("_id") @db.ObjectId
+  productId       String            @db.ObjectId
+  product         Product           @relation(fields: [productId], references: [id])
+  userId          String            @db.ObjectId
+  user            User              @relation("UserStockMovements", fields: [userId], references: [id])
+  type            StockMovementType
+  quantity        Float
+  reason          String?           // Raison du mouvement
+  notes           String?
+  createdAt       DateTime          @default(now())
+
+  // Relations optionnelles
+  saleId          String?           @db.ObjectId
+  sale            Sale?             @relation(fields: [saleId], references: [id])
+  purchaseOrderId String?           @db.ObjectId
+  purchaseOrder   PurchaseOrder?    @relation(fields: [purchaseOrderId], references: [id])
+
+  @@index([productId])
+  @@index([userId])
+  @@index([createdAt])
+  @@map("stockMovements")
+}
+
+model PurchaseOrder {
+  id              String   @id @default(auto()) @map("_id") @db.ObjectId
+  supplierId      String    @db.ObjectId
+  supplier        Supplier  @relation(fields: [supplierId], references: [id])
+  userId          String    @db.ObjectId
+  user            User      @relation("UserPurchaseOrders", fields: [userId], references: [id])
+  orderNumber     String    @unique
+  orderDate       DateTime  @default(now())
+  deliveryDate    DateTime?
+  totalAmount     Float     @default(0)
+  status          String    @default("PENDING") // PENDING, RECEIVED, CANCELLED
+  notes           String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  items           PurchaseOrderItem[]
+  stockMovements  StockMovement[]
+
+  @@index([supplierId])
+  @@index([orderDate])
+  @@map("purchaseOrders")
+}
+
+model PurchaseOrderItem {
+  id              String        @id @default(auto()) @map("_id") @db.ObjectId
+  purchaseOrderId String        @db.ObjectId
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id])
+  productId       String        @db.ObjectId
+  product         Product       @relation(fields: [productId], references: [id])
+  quantity        Float
+  unitPrice       Float
+  totalPrice      Float
+
+  @@index([purchaseOrderId])
+  @@index([productId])
+  @@map("purchaseOrderItems")
+}
+
+model Client {
+  id            String       @id @default(auto()) @map("_id") @db.ObjectId
+  name          String
+  phone         String       @unique
+  email         String?
+  address       String?
+  photoUrl      String?      // Photo optionnelle pour identification
+  limiteCredit  Float        @default(0) // Plafond de crédit autorisé
+  soldeActuel   Float        @default(0) // Dette actuelle
+  status        ClientStatus @default(ACTIVE)
+  autoBlockDays Int?         // Nombre de jours avant blocage automatique (null = désactivé)
+  notes         String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  // Relations
+  sales         Sale[]
+  payments      Payment[]
+
+  @@index([name])
+  @@index([status])
+  @@map("clients")
+}
+
+model SystemConfig {
+  id                    String   @id @default(auto()) @map("_id") @db.ObjectId
+  key                   String   @unique
+  value                 String
+  description           String?
+  updatedAt             DateTime @updatedAt
+  updatedBy             String?  @db.ObjectId
+
+  @@map("systemConfig")
+}
+
+model Sale {
+  id              String        @id @default(auto()) @map("_id") @db.ObjectId
+  saleNumber      String        @unique
+  userId          String        @db.ObjectId
+  user            User          @relation("UserSales", fields: [userId], references: [id])
+  
+  // Client (pour crédit)
+  clientId       String?       @db.ObjectId
+  client         Client?       @relation(fields: [clientId], references: [id])
+  customerName   String?       // Pour les ventes sans compte client
+  customerPhone  String?       // Pour les ventes sans compte client
+  
+  // Totaux
+  subtotal        Float
+  discountAmount  Float          @default(0)
+  discountPercent Float?         // Si remise en %
+  total           Float
+  
+  // Paiement
+  paymentMethod   PaymentMethod
+  amountPaid      Float          // Montant payé (peut être partiel)
+  remainingAmount Float          @default(0) // Reste à payer (pour crédit)
+  change          Float          @default(0) // Monnaie rendue
+  
+  // Échéance (pour crédit)
+  dueDate         DateTime?      // Date limite de remboursement
+  isPaid          Boolean        @default(false) // Si la vente est entièrement payée
+  
+  // Validation admin
+  requiresAdminApproval Boolean  @default(false) // Nécessite validation admin
+  approvedBy           String?   @db.ObjectId // ID de l'admin qui a approuvé
+  approvedAt           DateTime? // Date d'approbation
+  
+  notes           String?
+  createdAt       DateTime      @default(now())
+
+  items           SaleItem[]
+  stockMovements  StockMovement[]
+  payments        Payment[]     // Versements partiels
+
+  @@index([userId])
+  @@index([clientId])
+  @@index([createdAt])
+  @@index([dueDate])
+  @@index([isPaid])
+  @@map("sales")
+}
+
+model Payment {
+  id              String        @id @default(auto()) @map("_id") @db.ObjectId
+  clientId        String?       @db.ObjectId
+  client          Client?       @relation(fields: [clientId], references: [id])
+  saleId          String?       @db.ObjectId
+  sale            Sale?         @relation(fields: [saleId], references: [id])
+  userId          String        @db.ObjectId
+  user            User          @relation("UserPayments", fields: [userId], references: [id])
+  
+  amount          Float         // Montant versé
+  paymentMethod   PaymentMethod // Méthode de paiement
+  notes           String?
+  createdAt       DateTime      @default(now())
+
+  @@index([clientId])
+  @@index([saleId])
+  @@index([userId])
+  @@index([createdAt])
+  @@map("payments")
+}
+
+model SaleItem {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  saleId      String   @db.ObjectId
+  sale        Sale     @relation(fields: [saleId], references: [id])
+  productId   String   @db.ObjectId
+  product     Product  @relation(fields: [productId], references: [id])
+  quantity    Float
+  unitPrice   Float     // Prix au moment de la vente
+  discount    Float     @default(0)
+  total       Float
+
+  @@index([saleId])
+  @@index([productId])
+  @@map("saleItems")
+}
